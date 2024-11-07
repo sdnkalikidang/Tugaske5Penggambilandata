@@ -1,151 +1,79 @@
-import streamlit as st
+# Install dependencies jika diperlukan
+# pip install pandas
+# pip install numpy
+# pip install scikit-learn
+# pip install streamlit
+
 import pandas as pd
-import math
-from pathlib import Path
+import numpy as np
+import pickle
+import streamlit as st
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import accuracy_score
 
-# Set the title and favicon that appear in the Browser's tab bar.
-st.set_page_config(
-    page_title='GDP dashboard',
-    page_icon=':earth_americas:', # This is an emoji shortcode. Could be a URL too.
-)
+# Load dataset
+df = pd.read_csv('pencemaran_udara.csv')
 
-# -----------------------------------------------------------------------------
-# Declare some useful functions.
+# Memisahkan fitur (X) dan target (y)
+X = df[['pm10', 'so2', 'co', 'o3', 'no2']].fillna(0)  # Pilih kolom fitur dan isi nilai NaN dengan 0
+y = df['categori']  # Kolom target
 
-@st.cache_data
-def get_gdp_data():
-    """Grab GDP data from a CSV file.
+# Split data ke dalam data training dan testing
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3, random_state=0)
 
-    This uses caching to avoid having to read the file every time. If we were
-    reading from an HTTP endpoint instead of a file, it's a good idea to set
-    a maximum age to the cache with the TTL argument: @st.cache_data(ttl='1d')
+# Training model dengan RandomForestClassifier
+classifier = RandomForestClassifier()
+classifier.fit(X_train, y_train)
+
+# Evaluasi akurasi model
+y_pred = classifier.predict(X_test)
+score = accuracy_score(y_test, y_pred)
+print(f'Accuracy: {score}')
+
+# Menyimpan model ke file
+with open("air_quality_classifier.pkl", "wb") as pickle_out:
+    pickle.dump(classifier, pickle_out)
+
+# Load model untuk prediksi
+pickle_in = open('air_quality_classifier.pkl', 'rb')
+classifier = pickle.load(pickle_in)
+
+
+# Fungsi prediksi menggunakan model
+def prediction(pm10, so2, co, o3, no2):
+    # Predict menggunakan data input
+    pred = classifier.predict([[pm10, so2, co, o3, no2]])
+    return pred
+
+# Streamlit
+def main():
+    # Judul halaman
+    st.title("Air Quality Prediction")
+
+    # Desain halaman dengan HTML
+    html_temp = """
+    <div style="background-color:lightblue;padding:13px">
+    <h1 style="color:black;text-align:center;">Streamlit Air Quality Classifier ML App</h1>
+    </div>
     """
+    st.markdown(html_temp, unsafe_allow_html=True)
 
-    # Instead of a CSV on disk, you could read from an HTTP endpoint here too.
-    DATA_FILENAME = Path(__file__).parent/'data/gdp_data.csv'
-    raw_gdp_df = pd.read_csv(DATA_FILENAME)
+    # Input dari user
+    pm10 = st.number_input("PM10", value=0)
+    so2 = st.number_input("SO2", value=0)
+    co = st.number_input("CO", value=0)
+    o3 = st.number_input("O3", value=0)
+    no2 = st.number_input("NO2", value=0)
 
-    MIN_YEAR = 1960
-    MAX_YEAR = 2022
+    result = ""
 
-    # The data above has columns like:
-    # - Country Name
-    # - Country Code
-    # - [Stuff I don't care about]
-    # - GDP for 1960
-    # - GDP for 1961
-    # - GDP for 1962
-    # - ...
-    # - GDP for 2022
-    #
-    # ...but I want this instead:
-    # - Country Name
-    # - Country Code
-    # - Year
-    # - GDP
-    #
-    # So let's pivot all those year-columns into two: Year and GDP
-    gdp_df = raw_gdp_df.melt(
-        ['Country Code'],
-        [str(x) for x in range(MIN_YEAR, MAX_YEAR + 1)],
-        'Year',
-        'GDP',
-    )
+    # Tombol prediksi
+    if st.button("Predict"):
+        prediction_result = prediction(pm10, so2, co, o3, no2)
+        result = prediction_result[0]  # Mengambil hasil prediksi
 
-    # Convert years from string to integers
-    gdp_df['Year'] = pd.to_numeric(gdp_df['Year'])
+    st.success(f'The air quality is classified as: {result}')
 
-    return gdp_df
-
-gdp_df = get_gdp_data()
-
-# -----------------------------------------------------------------------------
-# Draw the actual page
-
-# Set the title that appears at the top of the page.
-'''
-# :earth_americas: GDP dashboard
-
-Browse GDP data from the [World Bank Open Data](https://data.worldbank.org/) website. As you'll
-notice, the data only goes to 2022 right now, and datapoints for certain years are often missing.
-But it's otherwise a great (and did I mention _free_?) source of data.
-'''
-
-# Add some spacing
-''
-''
-
-min_value = gdp_df['Year'].min()
-max_value = gdp_df['Year'].max()
-
-from_year, to_year = st.slider(
-    'Which years are you interested in?',
-    min_value=min_value,
-    max_value=max_value,
-    value=[min_value, max_value])
-
-countries = gdp_df['Country Code'].unique()
-
-if not len(countries):
-    st.warning("Select at least one country")
-
-selected_countries = st.multiselect(
-    'Which countries would you like to view?',
-    countries,
-    ['DEU', 'FRA', 'GBR', 'BRA', 'MEX', 'JPN'])
-
-''
-''
-''
-
-# Filter the data
-filtered_gdp_df = gdp_df[
-    (gdp_df['Country Code'].isin(selected_countries))
-    & (gdp_df['Year'] <= to_year)
-    & (from_year <= gdp_df['Year'])
-]
-
-st.header('GDP over time', divider='gray')
-
-''
-
-st.line_chart(
-    filtered_gdp_df,
-    x='Year',
-    y='GDP',
-    color='Country Code',
-)
-
-''
-''
-
-
-first_year = gdp_df[gdp_df['Year'] == from_year]
-last_year = gdp_df[gdp_df['Year'] == to_year]
-
-st.header(f'GDP in {to_year}', divider='gray')
-
-''
-
-cols = st.columns(4)
-
-for i, country in enumerate(selected_countries):
-    col = cols[i % len(cols)]
-
-    with col:
-        first_gdp = first_year[first_year['Country Code'] == country]['GDP'].iat[0] / 1000000000
-        last_gdp = last_year[last_year['Country Code'] == country]['GDP'].iat[0] / 1000000000
-
-        if math.isnan(first_gdp):
-            growth = 'n/a'
-            delta_color = 'off'
-        else:
-            growth = f'{last_gdp / first_gdp:,.2f}x'
-            delta_color = 'normal'
-
-        st.metric(
-            label=f'{country} GDP',
-            value=f'{last_gdp:,.0f}B',
-            delta=growth,
-            delta_color=delta_color
-        )
+if __name__ == '__main__':
+    main()
